@@ -1,6 +1,7 @@
-
 // --- API Configuration ---
-const ENCLAVE_API_KEY = 'REPLACE_WITH_YOUR_ENCLAVE_API_KEY';
+// MODIFICATION: Changed to 'let' and set as placeholder.
+// If you have an API key, paste it here to hide the API key input field.
+let ENCLAVE_API_KEY = 'PASTE_YOUR_ENCLAVE_API_KEY_HERE';
 const API_ENDPOINT = 'https://api.enclave.money/unified-deposit-address/create';
 
 // --- Static Data ---
@@ -54,13 +55,31 @@ const finalCopyBtn = document.getElementById('finalCopyBtn');
 const chainsModal = document.getElementById('chainsModal');
 const closeChainsModal = document.getElementById('closeChainsModal');
 
+// New DOM elements for API Key input
+const apiKeySection = document.getElementById('apiKeySection');
+const apiKeyInput = document.getElementById('apiKeyInput');
+const apiKeyStatus = document.getElementById('apiKeyStatus');
+
 
 let currentToken = 'USDC';
 let detectedAddressType = null;
 
 // --- Main Functions ---
 
-async function handleGenerateClick(isMock = false) {
+async function handleGenerateClick() {
+    // MODIFICATION: Check for API Key if it's the placeholder
+    if (ENCLAVE_API_KEY === 'PASTE_YOUR_ENCLAVE_API_KEY_HERE') {
+        const userApiKey = apiKeyInput.value.trim();
+        if (!userApiKey) {
+            setStatus('Please provide your Enclave API key to generate addresses.', true);
+            apiKeyStatus.textContent = 'API Key is required.';
+            return; // Stop execution
+        }
+        // Use the key provided by the user for this session
+        ENCLAVE_API_KEY = userApiKey;
+        apiKeyStatus.textContent = ''; // Clear key error
+    }
+
     const address = walletInput.value.trim();
     const token = tokenInput.value.trim();
     const selectedChainId = chainSelect.value;
@@ -80,26 +99,13 @@ async function handleGenerateClick(isMock = false) {
         return;
     }
 
-    if (ENCLAVE_API_KEY === 'PASTE_YOUR_ENCLAVE_API_KEY_HERE' && !isMock) {
-        setStatus('API Key is missing. Generating MOCK addresses.', true);
-        isMock = true;
-    }
-
-    setStatus(isMock ? 'Generating MOCK addresses...' : 'Generating REAL addresses from API...');
+    // MODIFICATION: Removed all 'isMock' logic.
+    setStatus('Generating REAL addresses from API...');
     generateBtn.classList.add('loading');
     generateBtn.disabled = true;
 
     try {
-        let udaData;
-        if (isMock) {
-            await new Promise(resolve => setTimeout(resolve, 1000)); 
-            udaData = {
-                evmAddress: '0x' + Array(40).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join(''),
-                solanaAddress: 'So1' + Array(41).fill(0).map(() => '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'[Math.floor(Math.random() * 58)]).join('')
-            };
-        } else {
-            udaData = await getUdaFromApi();
-        }
+        let udaData = await getUdaFromApi();
 
         if (udaData && udaData.evmAddress && udaData.solanaAddress) {
             displayUdaResults(udaData);
@@ -109,7 +115,17 @@ async function handleGenerateClick(isMock = false) {
         }
     } catch (error) {
         console.error('Error generating UDA:', error);
-        setStatus(`Error: ${error.message}`, true);
+        // MODIFICATION: More specific error for bad API keys
+        if (error.message.includes('401') || error.message.includes('403') || error.message.includes('Authorization')) {
+            setStatus('Error: API Key is invalid or unauthorized.', true);
+            // If API key was entered in the UI and failed, reset it so user can retry
+            if (apiKeyInput.value.trim()) {
+                 ENCLAVE_API_KEY = 'PASTE_YOUR_ENCLAVE_API_KEY_HERE';
+                 apiKeyStatus.textContent = 'The API Key you entered was invalid.';
+            }
+        } else {
+            setStatus(`Error: ${error.message}`, true);
+        }
         addressesContainer.classList.add('hidden');
     } finally {
         generateBtn.classList.remove('loading');
@@ -130,7 +146,7 @@ async function getUdaFromApi() {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'Authorization': ENCLAVE_API_KEY
+            'Authorization': ENCLAVE_API_KEY // This will now use the global 'let' variable
         },
         body: JSON.stringify(requestPayload)
     });
@@ -139,8 +155,19 @@ async function getUdaFromApi() {
     console.log('Full API Response:', JSON.stringify(responseData, null, 2));
 
     if (!response.ok) {
-        const errorMessage = responseData.error || `API Error ${response.status}: ${response.statusText}`;
-        throw new Error(errorMessage);
+        // MODIFICATION: Improved error message parsing
+        let errorMsg = `API Error ${response.status}: ${response.statusText}`;
+        if (responseData.error) {
+            errorMsg = responseData.error;
+        } else if (responseData.message) {
+            errorMsg = responseData.message;
+        }
+        
+        if (response.status === 401 || response.status === 403) {
+             throw new Error(`Authorization Failed (401/403). Check your API Key.`);
+        }
+        
+        throw new Error(errorMsg);
     }
     
     const udaData = responseData.data;
@@ -244,10 +271,13 @@ window.showCopyModal = function(type) {
     copyInstructionModal.classList.add('active');
     
     if (type === 'evm') {
-        document.getElementById('showChainsLink').addEventListener('click', (e) => {
-            e.preventDefault();
-            chainsModal.classList.add('active');
-        });
+        const showChainsLink = document.getElementById('showChainsLink');
+        if (showChainsLink) {
+            showChainsLink.addEventListener('click', (e) => {
+                e.preventDefault();
+                chainsModal.classList.add('active');
+            });
+        }
     }
     
     finalCopyBtn.onclick = () => {
@@ -255,14 +285,30 @@ window.showCopyModal = function(type) {
         const qrWrapperId = type === 'evm' ? 'evmQrWrapper' : 'solanaQrWrapper';
         document.getElementById(qrWrapperId).classList.add('revealed');
         const addressElement = document.getElementById(addressId);
-        navigator.clipboard.writeText(addressElement.textContent).then(() => {
+        
+        // Use document.execCommand('copy') for broader iframe compatibility
+        const textarea = document.createElement('textarea');
+        textarea.value = addressElement.textContent;
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+            document.execCommand('copy');
             const originalHTML = finalCopyBtn.innerHTML;
             finalCopyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
             setTimeout(() => { 
                 finalCopyBtn.innerHTML = originalHTML;
                 copyInstructionModal.classList.remove('active');
             }, 1500);
-        });
+        } catch (err) {
+            console.error('Failed to copy text: ', err);
+            // Fallback for failure
+            const originalHTML = finalCopyBtn.innerHTML;
+            finalCopyBtn.innerHTML = 'Copy Failed';
+            setTimeout(() => { 
+                finalCopyBtn.innerHTML = originalHTML;
+            }, 1500);
+        }
+        document.body.removeChild(textarea);
     };
 };
 
@@ -273,6 +319,8 @@ function updateSelectedChainDisplay() {
 function updateFormBasedOnAddress(type) {
     const solanaChainId = '792703809';
     const defaultEvmChainId = '8453';
+    
+    // Find the SOL button (which is commented out in HTML but the logic handles it)
     const solTokenBtn = document.querySelector('[data-token="SOL"]');
     const usdcTokenBtn = document.querySelector('[data-token="USDC"]');
     
@@ -289,18 +337,20 @@ function updateFormBasedOnAddress(type) {
 
     if (type === 'SOLANA') {
         chainSelect.value = solanaChainId;
-        solTokenBtn.style.display = 'block';
+        if(solTokenBtn) solTokenBtn.style.display = 'block';
         if (usdcTokenBtn) usdcTokenBtn.click();
     } else if (type === 'EVM') {
         if (chainSelect.value === solanaChainId) {
             chainSelect.value = defaultEvmChainId;
         }
-        solTokenBtn.style.display = 'none';
-        if (solTokenBtn.classList.contains('active')) {
-            if (usdcTokenBtn) usdcTokenBtn.click();
+        if(solTokenBtn) {
+            solTokenBtn.style.display = 'none';
+            if (solTokenBtn.classList.contains('active')) {
+                if (usdcTokenBtn) usdcTokenBtn.click();
+            }
         }
     } else {
-        solTokenBtn.style.display = 'block';
+        if(solTokenBtn) solTokenBtn.style.display = 'block';
     }
 
     updateTokenAddress();
@@ -351,7 +401,13 @@ function populateTokenTable() {
 }
 
 window.copyTokenAddress = function(address, button) {
-    navigator.clipboard.writeText(address).then(() => {
+    // Use document.execCommand('copy') for broader iframe compatibility
+    const textarea = document.createElement('textarea');
+    textarea.value = address;
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+        document.execCommand('copy');
         button.classList.add('copied');
         button.innerHTML = '<i class="fas fa-check"></i> Copied';
         setTimeout(() => {
@@ -359,7 +415,10 @@ window.copyTokenAddress = function(address, button) {
             button.innerHTML = '<i class="fas fa-copy"></i> Copy';
         }, 2000);
         tokenInput.value = address;
-    });
+    } catch (err) {
+        console.error('Failed to copy token address: ', err);
+    }
+    document.body.removeChild(textarea);
 };
 
 function updateTokenAddress() {
@@ -410,13 +469,18 @@ advancedToggleBtn.addEventListener('click', () => {
 
 // The main action button
 generateBtn.addEventListener('click', () => {
-    handleGenerateClick(false);
+    handleGenerateClick();
 });
 
 // --- Initial State Setup ---
 document.addEventListener('DOMContentLoaded', () => {
+    // MODIFICATION: Check for API key and show input if missing
+    if (ENCLAVE_API_KEY === 'PASTE_YOUR_ENCLAVE_API_KEY_HERE') {
+        apiKeySection.classList.remove('hidden');
+    }
+
     walletInput.dispatchEvent(new Event('input', { bubbles: true }));
     updateTokenAddress();
     updateQuickRefButton();
     updateSelectedChainDisplay();
-});
+})
